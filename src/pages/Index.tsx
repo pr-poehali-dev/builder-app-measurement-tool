@@ -21,13 +21,14 @@ interface Opening {
   width: number; // in meters
 }
 
-interface Room { id: string; name: string; walls: Wall[]; }
+interface Room { id: string; name: string; floor: number; walls: Wall[]; }
 
 interface Project {
   id: string;
   name: string;
   address: string;
   updatedAt: string;
+  floors: number;
   rooms: Room[];
   measurements: Measurement[];
 }
@@ -41,14 +42,32 @@ interface Measurement {
   source: 'manual' | 'bluetooth';
 }
 
+const ROOM_NAMES = ['Гостиная', 'Спальня', 'Кухня', 'Ванная', 'Коридор', 'Кабинет', 'Детская', 'Балкон', 'Кладовая', 'Санузел'];
+
+function generateRooms(floors: number, roomsPerFloor: number): Room[] {
+  const rooms: Room[] = [];
+  for (let f = 1; f <= floors; f++) {
+    for (let r = 0; r < roomsPerFloor; r++) {
+      rooms.push({
+        id: `f${f}r${r}_${Date.now()}`,
+        name: ROOM_NAMES[r % ROOM_NAMES.length] + (floors > 1 ? ` (эт. ${f})` : ''),
+        floor: f,
+        walls: [],
+      });
+    }
+  }
+  return rooms;
+}
+
 const DEMO_PROJECTS: Project[] = [
   {
     id: '1',
     name: 'Кв. Ленина 14, кв. 23',
     address: 'ул. Ленина, 14, кв. 23',
     updatedAt: '14.05.2026 09:41',
+    floors: 1,
     rooms: [{
-      id: 'r1', name: 'Гостиная',
+      id: 'r1', name: 'Гостиная', floor: 1,
       walls: [
         { id: 'w1', start: { x: 80, y: 80 }, end: { x: 380, y: 80 }, length: 5.8 },
         { id: 'w2', start: { x: 380, y: 80 }, end: { x: 380, y: 280 }, length: 3.9 },
@@ -62,8 +81,8 @@ const DEMO_PROJECTS: Project[] = [
       { id: 'm3', value: 2.7, unit: 'м', label: 'Высота потолка', timestamp: '14.05.2026 09:22', source: 'manual' },
     ],
   },
-  { id: '2', name: 'Кв. Мира 8, кв. 5', address: 'пр. Мира, 8, кв. 5', updatedAt: '13.05.2026 16:30', rooms: [], measurements: [] },
-  { id: '3', name: 'Офис Садовая 22', address: 'ул. Садовая, 22, офис 4', updatedAt: '10.05.2026 11:05', rooms: [], measurements: [] },
+  { id: '2', name: 'Кв. Мира 8, кв. 5', address: 'пр. Мира, 8, кв. 5', updatedAt: '13.05.2026 16:30', floors: 1, rooms: generateRooms(1, 3), measurements: [] },
+  { id: '3', name: 'Офис Садовая 22', address: 'ул. Садовая, 22, офис 4', updatedAt: '10.05.2026 11:05', floors: 2, rooms: generateRooms(2, 4), measurements: [] },
 ];
 
 const DEMO_HISTORY: Measurement[] = [
@@ -144,6 +163,8 @@ const Index = () => {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjName, setNewProjName] = useState('');
   const [newProjAddress, setNewProjAddress] = useState('');
+  const [newProjFloors, setNewProjFloors] = useState(1);
+  const [newProjRooms, setNewProjRooms] = useState(3);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const snapToGrid = (v: number) => Math.round(v / 10) * 10;
@@ -244,13 +265,16 @@ const Index = () => {
       name: newProjName.trim(),
       address: newProjAddress.trim() || '',
       updatedAt: new Date().toLocaleString('ru'),
-      rooms: [],
+      floors: newProjFloors,
+      rooms: generateRooms(newProjFloors, newProjRooms),
       measurements: [],
     };
     setProjects(prev => [np, ...prev]);
     setShowNewProject(false);
     setNewProjName('');
     setNewProjAddress('');
+    setNewProjFloors(1);
+    setNewProjRooms(3);
     openProject(np);
   };
 
@@ -349,6 +373,10 @@ const Index = () => {
                       </div>
                       <p className="text-xs text-muted-foreground ml-4">{p.address}</p>
                       <div className="flex items-center gap-4 mt-3 ml-4">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Icon name="Layers" size={11} />
+                          {p.floors} {p.floors === 1 ? 'этаж' : p.floors < 5 ? 'этажа' : 'этажей'}
+                        </span>
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Icon name="LayoutPanelLeft" size={11} />
                           {p.rooms.length} помещ.
@@ -760,9 +788,14 @@ const Index = () => {
         {/* ── MODAL: New project ── */}
         {showNewProject && (
           <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-20 animate-fade-in">
-            <div className="bg-card border border-border rounded-lg p-6 w-80 shadow-2xl animate-slide-up">
-              <h3 className="text-sm font-semibold mb-4">Новый проект</h3>
-              <div className="space-y-3">
+            <div className="bg-card border border-border rounded-lg p-6 w-96 shadow-2xl animate-slide-up">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-6 h-6 bg-primary rounded-sm flex items-center justify-center shrink-0">
+                  <Icon name="Plus" size={12} className="text-primary-foreground" />
+                </div>
+                <h3 className="text-sm font-semibold">Новый проект</h3>
+              </div>
+              <div className="space-y-4">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Название *</label>
                   <input type="text" value={newProjName} onChange={e => setNewProjName(e.target.value)}
@@ -775,15 +808,89 @@ const Index = () => {
                     placeholder="ул. Советская, 5, кв. 12"
                     className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm outline-none focus:border-primary transition-colors text-foreground placeholder:text-muted-foreground" />
                 </div>
+
+                {/* Floors & Rooms counters */}
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-2 flex items-center gap-1 block">
+                      <Icon name="Layers" size={11} />
+                      Этажей
+                    </label>
+                    <div className="flex items-center gap-0 border border-border rounded overflow-hidden">
+                      <button
+                        onClick={() => setNewProjFloors(f => Math.max(1, f - 1))}
+                        className="w-9 h-9 flex items-center justify-center bg-secondary hover:bg-secondary/60 text-foreground transition-colors text-sm font-bold shrink-0">
+                        −
+                      </button>
+                      <span className="flex-1 text-center font-mono text-sm font-semibold text-foreground bg-secondary/40 py-1.5">
+                        {newProjFloors}
+                      </span>
+                      <button
+                        onClick={() => setNewProjFloors(f => Math.min(20, f + 1))}
+                        className="w-9 h-9 flex items-center justify-center bg-secondary hover:bg-secondary/60 text-foreground transition-colors text-sm font-bold shrink-0">
+                        +
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground/60 mt-1 text-center">макс. 20</p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-2 flex items-center gap-1 block">
+                      <Icon name="LayoutPanelLeft" size={11} />
+                      Помещений на этаже
+                    </label>
+                    <div className="flex items-center gap-0 border border-border rounded overflow-hidden">
+                      <button
+                        onClick={() => setNewProjRooms(r => Math.max(1, r - 1))}
+                        className="w-9 h-9 flex items-center justify-center bg-secondary hover:bg-secondary/60 text-foreground transition-colors text-sm font-bold shrink-0">
+                        −
+                      </button>
+                      <span className="flex-1 text-center font-mono text-sm font-semibold text-foreground bg-secondary/40 py-1.5">
+                        {newProjRooms}
+                      </span>
+                      <button
+                        onClick={() => setNewProjRooms(r => Math.min(10, r + 1))}
+                        className="w-9 h-9 flex items-center justify-center bg-secondary hover:bg-secondary/60 text-foreground transition-colors text-sm font-bold shrink-0">
+                        +
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground/60 mt-1 text-center">макс. 10</p>
+                  </div>
+                </div>
+
+                {/* Preview */}
+                <div className="bg-secondary/40 rounded p-3 border border-border/50">
+                  <p className="text-xs text-muted-foreground mb-2">Будет создано:</p>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="flex items-center gap-1.5 text-xs font-medium">
+                      <span className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
+                        <Icon name="Layers" size={10} className="text-primary" />
+                      </span>
+                      {newProjFloors} {newProjFloors === 1 ? 'этаж' : newProjFloors < 5 ? 'этажа' : 'этажей'}
+                    </span>
+                    <Icon name="ChevronRight" size={10} className="text-muted-foreground" />
+                    <span className="flex items-center gap-1.5 text-xs font-medium">
+                      <span className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
+                        <Icon name="LayoutPanelLeft" size={10} className="text-primary" />
+                      </span>
+                      {newProjFloors * newProjRooms} помещений
+                    </span>
+                  </div>
+                  {newProjFloors > 1 && (
+                    <p className="text-xs text-muted-foreground/60 mt-2">
+                      Названия: {ROOM_NAMES.slice(0, newProjRooms).join(', ')}{newProjRooms > ROOM_NAMES.length ? '...' : ''}
+                    </p>
+                  )}
+                </div>
               </div>
+
               <div className="flex gap-2 mt-5">
-                <button onClick={() => setShowNewProject(false)}
+                <button onClick={() => { setShowNewProject(false); setNewProjFloors(1); setNewProjRooms(3); }}
                   className="flex-1 bg-secondary text-foreground py-2 rounded text-xs font-medium hover:bg-secondary/70 transition-colors">
                   Отмена
                 </button>
                 <button onClick={createProject} disabled={!newProjName.trim()}
                   className="flex-1 bg-primary text-primary-foreground py-2 rounded text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                  Создать
+                  Создать проект
                 </button>
               </div>
             </div>
