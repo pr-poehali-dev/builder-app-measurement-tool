@@ -21,7 +21,9 @@ interface Opening {
   width: number; // in meters
 }
 
-interface Room { id: string; name: string; floor: number; walls: Wall[]; }
+type RoomCategory = 'room' | 'corridor' | 'bathroom';
+
+interface Room { id: string; name: string; floor: number; category: RoomCategory; walls: Wall[]; }
 
 interface Project {
   id: string;
@@ -42,16 +44,24 @@ interface Measurement {
   source: 'manual' | 'bluetooth';
 }
 
-const ROOM_NAMES = ['Гостиная', 'Спальня', 'Кухня', 'Ванная', 'Коридор', 'Кабинет', 'Детская', 'Балкон', 'Кладовая', 'Санузел'];
+const ROOM_PRESETS: Record<RoomCategory, { names: string[]; icon: string; color: string; label: string }> = {
+  room: { names: ['Гостиная', 'Спальня', 'Кухня', 'Кабинет', 'Детская', 'Столовая'], icon: 'Home', color: 'text-blue-400', label: 'Комната' },
+  corridor: { names: ['Коридор', 'Прихожая', 'Холл', 'Балкон', 'Лоджия', 'Кладовая'], icon: 'ArrowLeftRight', color: 'text-yellow-400', label: 'Коридор' },
+  bathroom: { names: ['Санузел', 'Ванная', 'Туалет', 'Совмещённый с/у'], icon: 'Droplets', color: 'text-cyan-400', label: 'Санузел' },
+};
 
 function generateRooms(floors: number, roomsPerFloor: number): Room[] {
   const rooms: Room[] = [];
+  const allNames = ['Гостиная', 'Спальня', 'Кухня', 'Коридор', 'Санузел', 'Кабинет', 'Детская', 'Балкон', 'Кладовая', 'Ванная'];
+  const catMap: RoomCategory[] = ['room', 'room', 'room', 'corridor', 'bathroom', 'room', 'room', 'corridor', 'corridor', 'bathroom'];
   for (let f = 1; f <= floors; f++) {
     for (let r = 0; r < roomsPerFloor; r++) {
+      const idx = r % allNames.length;
       rooms.push({
-        id: `f${f}r${r}_${Date.now()}`,
-        name: ROOM_NAMES[r % ROOM_NAMES.length] + (floors > 1 ? ` (эт. ${f})` : ''),
+        id: `f${f}r${r}_${Date.now() + r}`,
+        name: allNames[idx] + (floors > 1 ? ` (эт. ${f})` : ''),
         floor: f,
+        category: catMap[idx],
         walls: [],
       });
     }
@@ -67,7 +77,7 @@ const DEMO_PROJECTS: Project[] = [
     updatedAt: '14.05.2026 09:41',
     floors: 1,
     rooms: [{
-      id: 'r1', name: 'Гостиная', floor: 1,
+      id: 'r1', name: 'Гостиная', floor: 1, category: 'room' as RoomCategory,
       walls: [
         { id: 'w1', start: { x: 80, y: 80 }, end: { x: 380, y: 80 }, length: 5.8 },
         { id: 'w2', start: { x: 380, y: 80 }, end: { x: 380, y: 280 }, length: 3.9 },
@@ -165,6 +175,11 @@ const Index = () => {
   const [newProjAddress, setNewProjAddress] = useState('');
   const [newProjFloors, setNewProjFloors] = useState(1);
   const [newProjRooms, setNewProjRooms] = useState(3);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [showAddRoom, setShowAddRoom] = useState(false);
+  const [newRoomCategory, setNewRoomCategory] = useState<RoomCategory>('room');
+  const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomFloor, setNewRoomFloor] = useState(1);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const snapToGrid = (v: number) => Math.round(v / 10) * 10;
@@ -176,10 +191,49 @@ const Index = () => {
 
   const openProject = (p: Project) => {
     setActiveProject(p);
-    setWalls(p.rooms[0]?.walls ?? []);
+    const firstRoom = p.rooms[0] ?? null;
+    setActiveRoomId(firstRoom?.id ?? null);
+    setWalls(firstRoom?.walls ?? []);
     setOpenings([]);
     setSelectedId(null);
     setTab('editor');
+  };
+
+  const switchRoom = (room: Room) => {
+    setActiveRoomId(room.id);
+    setWalls(room.walls);
+    setOpenings([]);
+    setSelectedId(null);
+  };
+
+  const addRoom = () => {
+    if (!activeProject || !newRoomName.trim()) return;
+    const room: Room = {
+      id: Date.now().toString(),
+      name: newRoomName.trim(),
+      floor: newRoomFloor,
+      category: newRoomCategory,
+      walls: [],
+    };
+    const updated = { ...activeProject, rooms: [...activeProject.rooms, room] };
+    setActiveProject(updated);
+    setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+    setShowAddRoom(false);
+    setNewRoomName('');
+    switchRoom(room);
+  };
+
+  const deleteRoom = (roomId: string) => {
+    if (!activeProject) return;
+    const updated = { ...activeProject, rooms: activeProject.rooms.filter(r => r.id !== roomId) };
+    setActiveProject(updated);
+    setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+    if (activeRoomId === roomId) {
+      const next = updated.rooms[0] ?? null;
+      setActiveRoomId(next?.id ?? null);
+      setWalls(next?.walls ?? []);
+      setOpenings([]);
+    }
   };
 
   const handleBluetooth = () => {
@@ -443,10 +497,86 @@ const Index = () => {
             </div>
 
             <div className="flex flex-1 overflow-hidden">
+
+              {/* ── Rooms sidebar ── */}
+              <div className="w-52 border-r border-border bg-card shrink-0 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Помещения</span>
+                  <button onClick={() => { setShowAddRoom(true); setNewRoomFloor(activeProject?.floors ?? 1); setNewRoomName(ROOM_PRESETS.room.names[0]); setNewRoomCategory('room'); }}
+                    className="w-5 h-5 flex items-center justify-center rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors">
+                    <Icon name="Plus" size={12} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto py-1">
+                  {activeProject && activeProject.rooms.length === 0 && (
+                    <div className="px-3 py-4 text-center">
+                      <p className="text-xs text-muted-foreground/60">Нет помещений</p>
+                      <button onClick={() => { setShowAddRoom(true); setNewRoomFloor(1); setNewRoomName(ROOM_PRESETS.room.names[0]); setNewRoomCategory('room'); }}
+                        className="mt-2 text-xs text-primary hover:underline">
+                        + добавить
+                      </button>
+                    </div>
+                  )}
+                  {(['room', 'corridor', 'bathroom'] as RoomCategory[]).map(cat => {
+                    const catRooms = activeProject?.rooms.filter(r => r.category === cat) ?? [];
+                    if (catRooms.length === 0) return null;
+                    const preset = ROOM_PRESETS[cat];
+                    return (
+                      <div key={cat} className="mb-1">
+                        <div className="flex items-center gap-1.5 px-3 py-1.5">
+                          <Icon name={preset.icon} size={10} className={preset.color} />
+                          <span className="text-xs font-medium text-muted-foreground/70 uppercase tracking-wider">{preset.label}</span>
+                          <span className="text-xs text-muted-foreground/40 ml-auto">{catRooms.length}</span>
+                        </div>
+                        {catRooms.map(room => (
+                          <div key={room.id}
+                            onClick={() => switchRoom(room)}
+                            className={`group flex items-center gap-2 px-3 py-2 cursor-pointer transition-all mx-1 rounded ${
+                              activeRoomId === room.id
+                                ? 'bg-primary/10 border border-primary/30 text-foreground'
+                                : 'hover:bg-secondary text-muted-foreground hover:text-foreground border border-transparent'
+                            }`}>
+                            <div className={`w-1 h-1 rounded-full shrink-0 ${activeRoomId === room.id ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
+                            <span className="text-xs flex-1 truncate">{room.name}</span>
+                            {activeProject && activeProject.floors > 1 && (
+                              <span className="text-xs text-muted-foreground/40 shrink-0 font-mono">{room.floor}</span>
+                            )}
+                            <button onClick={e => { e.stopPropagation(); deleteRoom(room.id); }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity w-4 h-4 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive shrink-0">
+                              <Icon name="X" size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Canvas */}
-              <div className="flex-1 relative overflow-hidden">
+              <div className="flex-1 relative overflow-hidden flex flex-col">
+                {/* Active room label */}
+                {activeRoomId && (() => {
+                  const room = activeProject?.rooms.find(r => r.id === activeRoomId);
+                  if (!room) return null;
+                  const preset = ROOM_PRESETS[room.category];
+                  return (
+                    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/50 bg-card/50 shrink-0">
+                      <Icon name={preset.icon} size={11} className={preset.color} />
+                      <span className="text-xs font-medium">{room.name}</span>
+                      {activeProject && activeProject.floors > 1 && (
+                        <span className="text-xs text-muted-foreground font-mono ml-1">эт. {room.floor}</span>
+                      )}
+                      <span className={`ml-2 text-xs px-1.5 py-0.5 rounded border ${
+                        room.category === 'room' ? 'border-blue-400/30 text-blue-400 bg-blue-400/5'
+                        : room.category === 'corridor' ? 'border-yellow-400/30 text-yellow-400 bg-yellow-400/5'
+                        : 'border-cyan-400/30 text-cyan-400 bg-cyan-400/5'
+                      }`}>{preset.label}</span>
+                    </div>
+                  );
+                })()}
                 <div ref={canvasRef}
-                  className="w-full h-full canvas-grid-major select-none"
+                  className="flex-1 relative canvas-grid-major select-none"
                   style={{ cursor: activeTool === 'wall' ? 'crosshair' : activeTool === 'window' || activeTool === 'door' ? 'cell' : 'default' }}
                   onMouseDown={handleCanvasMouseDown}
                   onMouseMove={handleCanvasMouseMove}
@@ -549,8 +679,13 @@ const Index = () => {
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                       <div className="text-center opacity-25">
                         <Icon name="PenTool" size={36} className="mx-auto mb-3 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">Выберите «Стена» и нарисуйте план</p>
-                        <p className="text-xs text-muted-foreground mt-1">Затем добавьте окна и двери</p>
+                        {activeRoomId
+                          ? <p className="text-sm text-muted-foreground">
+                              {activeProject?.rooms.find(r => r.id === activeRoomId)?.name ?? 'Помещение'} — план пуст
+                            </p>
+                          : <p className="text-sm text-muted-foreground">Выберите помещение слева</p>
+                        }
+                        <p className="text-xs text-muted-foreground mt-1">Инструмент «Стена» — рисуй план</p>
                       </div>
                     </div>
                   )}
@@ -754,6 +889,87 @@ const Index = () => {
           </div>
         )}
 
+        {/* ── MODAL: Add room ── */}
+        {showAddRoom && (
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-20 animate-fade-in">
+            <div className="bg-card border border-border rounded-lg p-6 w-88 shadow-2xl animate-slide-up" style={{ width: 380 }}>
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-6 h-6 bg-primary/20 border border-primary/30 rounded-sm flex items-center justify-center shrink-0">
+                  <Icon name="LayoutPanelLeft" size={12} className="text-primary" />
+                </div>
+                <h3 className="text-sm font-semibold">Добавить помещение</h3>
+              </div>
+
+              {/* Category picker */}
+              <div className="mb-4">
+                <label className="text-xs text-muted-foreground mb-2 block">Категория</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['room', 'corridor', 'bathroom'] as RoomCategory[]).map(cat => {
+                    const p = ROOM_PRESETS[cat];
+                    return (
+                      <button key={cat} onClick={() => { setNewRoomCategory(cat); setNewRoomName(p.names[0]); }}
+                        className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded border transition-all ${
+                          newRoomCategory === cat
+                            ? 'border-primary bg-primary/10 text-foreground'
+                            : 'border-border bg-secondary/40 text-muted-foreground hover:border-border/80 hover:text-foreground'
+                        }`}>
+                        <Icon name={p.icon} size={16} className={newRoomCategory === cat ? p.color : ''} />
+                        <span className="text-xs font-medium">{p.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Name picker */}
+              <div className="mb-3">
+                <label className="text-xs text-muted-foreground mb-2 block">Название</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {ROOM_PRESETS[newRoomCategory].names.map(n => (
+                    <button key={n} onClick={() => setNewRoomName(n)}
+                      className={`px-2.5 py-1 rounded text-xs border transition-all ${
+                        newRoomName === n ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'
+                      }`}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)}
+                  placeholder="Своё название..."
+                  className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm outline-none focus:border-primary transition-colors text-foreground placeholder:text-muted-foreground" />
+              </div>
+
+              {/* Floor picker */}
+              {activeProject && activeProject.floors > 1 && (
+                <div className="mb-3">
+                  <label className="text-xs text-muted-foreground mb-2 block">Этаж</label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {Array.from({ length: activeProject.floors }, (_, i) => i + 1).map(f => (
+                      <button key={f} onClick={() => setNewRoomFloor(f)}
+                        className={`w-8 h-8 rounded text-xs font-mono font-medium border transition-all ${
+                          newRoomFloor === f ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'
+                        }`}>
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-5">
+                <button onClick={() => setShowAddRoom(false)}
+                  className="flex-1 bg-secondary text-foreground py-2 rounded text-xs font-medium hover:bg-secondary/70 transition-colors">
+                  Отмена
+                </button>
+                <button onClick={addRoom} disabled={!newRoomName.trim()}
+                  className="flex-1 bg-primary text-primary-foreground py-2 rounded text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  Добавить
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── MODAL: Edit project ── */}
         {editingProject && (
           <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-20 animate-fade-in">
@@ -935,7 +1151,10 @@ const Index = () => {
       {/* Status bar */}
       <footer className="flex items-center justify-between px-4 py-2 border-t border-border bg-card text-xs text-muted-foreground shrink-0">
         <span className="font-mono">
-          {tab === 'editor' && `${walls.length} стен · ${openings.length} проёмов`}
+          {tab === 'editor' && (() => {
+            const room = activeProject?.rooms.find(r => r.id === activeRoomId);
+            return `${room ? room.name + ' · ' : ''}${walls.length} стен · ${openings.length} проёмов`;
+          })()}
           {tab === 'projects' && `${projects.length} проектов`}
           {tab === 'history' && `${DEMO_HISTORY.length} записей`}
           {tab === 'export' && 'Готово к экспорту'}
